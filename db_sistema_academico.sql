@@ -1,120 +1,149 @@
--- 1. Eliminar y recrear la base de datos para limpiar todo
+-- Resetear la base de datos
 DROP DATABASE IF EXISTS db_sistema_academico;
 CREATE DATABASE db_sistema_academico CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE db_sistema_academico;
 
 -- ============================================================================
--- TABLAS MAESTRAS (Datos estáticos y reutilizables)
+-- 1. CATÁLOGOS DE SEGURIDAD Y UBICACIÓN
 -- ============================================================================
 
--- Tabla: Ubigeo (Evita duplicidad de departamentos, provincias y distritos)
+-- Tabla de Roles (Admin, Maestro, Alumno)
+CREATE TABLE roles (
+    id INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID del rol',
+    nombre VARCHAR(30) NOT NULL UNIQUE COMMENT 'Ej: Admin, Maestro, Alumno',
+    descripcion VARCHAR(100) COMMENT 'Descripción de los permisos del rol'
+) COMMENT='Roles del sistema para control de acceso';
+
+-- Ubigeo normalizado
 CREATE TABLE ubigeo (
-    codigo_ubigeo VARCHAR(6) PRIMARY KEY COMMENT 'Código UBIGEO peruano de 6 dígitos',
-    departamento VARCHAR(50) NOT NULL COMMENT 'Nombre del departamento',
-    provincia VARCHAR(50) NOT NULL COMMENT 'Nombre de la provincia',
-    distrito VARCHAR(50) NOT NULL COMMENT 'Nombre del distrito'
-) COMMENT='Catálogo estándar de Ubigeos';
+    codigo VARCHAR(6) PRIMARY KEY COMMENT 'Código UBIGEO de 6 dígitos',
+    departamento VARCHAR(50) NOT NULL,
+    provincia VARCHAR(50) NOT NULL,
+    distrito VARCHAR(50) NOT NULL
+) COMMENT='Catálogo de ubicación geográfica';
 
--- Tabla: Estudiantes (Datos personales únicos del alumno)
-CREATE TABLE estudiantes (
-    codigo_estudiante VARCHAR(20) PRIMARY KEY COMMENT 'Código institucional único (Ej: RC23003, RDP26001)',
-    dni VARCHAR(8) NOT NULL UNIQUE COMMENT 'Documento Nacional de Identidad',
-    primer_apellido VARCHAR(50) NOT NULL COMMENT 'Apellido paterno',
-    segundo_apellido VARCHAR(50) NOT NULL COMMENT 'Apellido materno',
-    nombres VARCHAR(100) NOT NULL COMMENT 'Nombres completos',
-    fecha_nacimiento DATE COMMENT 'Fecha de nacimiento YYYY-MM-DD',
-    sexo ENUM('M', 'F') NOT NULL COMMENT 'Sexo biológico: M o F',
-    telefono VARCHAR(15) COMMENT 'Teléfono móvil o fijo principal',
-    correo VARCHAR(100) COMMENT 'Correo electrónico del estudiante',
-    direccion VARCHAR(200) COMMENT 'Dirección de domicilio',
-    codigo_ubigeo VARCHAR(6) COMMENT 'Relación con el catálogo de ubicación geográfica',
-    FOREIGN KEY (codigo_ubigeo) REFERENCES ubigeo(codigo_ubigeo)
-) COMMENT='Registro maestro de estudiantes';
+-- ============================================================================
+-- 2. USUARIOS Y PERFILES (General para Alumnos, Maestros y Admins)
+-- ============================================================================
 
--- Tabla: Contactos de Emergencia (1 Estudiante puede tener un contacto asignado)
+-- Tabla Central de Usuarios (Login y Autenticación)
+CREATE TABLE usuarios (
+    id INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID interno del usuario',
+    id_rol INT NOT NULL COMMENT 'Relación con la tabla roles',
+    codigo_institucional VARCHAR(20) UNIQUE COMMENT 'Código único (Ej: RC23003 para alumno, DOC101 para maestro)',
+    dni VARCHAR(8) NOT NULL UNIQUE COMMENT 'DNI de 8 dígitos',
+    primer_apellido VARCHAR(50) NOT NULL,
+    segundo_apellido VARCHAR(50) NOT NULL,
+    nombres VARCHAR(100) NOT NULL,
+    correo VARCHAR(100) NOT NULL UNIQUE COMMENT 'Correo institucional o personal',
+    clave VARCHAR(255) NOT NULL COMMENT 'Contraseña encriptada (Hash)',
+    token VARCHAR(255) NULL COMMENT 'Token de sesión o recuperación',
+    sexo ENUM('M', 'F') NOT NULL,
+    telefono VARCHAR(15),
+    direccion VARCHAR(200),
+    codigo_ubigeo VARCHAR(6),
+    estado ENUM('Activo', 'Inactivo') DEFAULT 'Activo' COMMENT 'Estado de la cuenta',
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Fecha y hora de creación de la cuenta',
+    FOREIGN KEY (id_rol) REFERENCES roles(id),
+    FOREIGN KEY (codigo_ubigeo) REFERENCES ubigeo(codigo)
+) COMMENT='Usuarios del sistema (Alumnos, Docentes y Administradores)';
+
+-- Contactos de Emergencia (Aplica principalmente a alumnos)
 CREATE TABLE contactos_emergencia (
-    id_contacto INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Identificador del contacto',
-    codigo_estudiante VARCHAR(20) NOT NULL UNIQUE COMMENT 'Código del alumno enlazado',
-    nombre_contacto VARCHAR(150) NOT NULL COMMENT 'Nombres y apellidos del familiar/contacto',
-    telefono_emergencia VARCHAR(15) NOT NULL COMMENT 'Teléfono de urgencias',
-    FOREIGN KEY (codigo_estudiante) REFERENCES estudiantes(codigo_estudiante) ON DELETE CASCADE
-) COMMENT='Contactos de emergencia del estudiante';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_usuario INT NOT NULL UNIQUE COMMENT 'Usuario al que pertenece el contacto',
+    nombre_contacto VARCHAR(150) NOT NULL,
+    telefono VARCHAR(15) NOT NULL,
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id) ON DELETE CASCADE
+) COMMENT='Contactos de emergencia de usuarios';
 
--- Tabla: Carreras Profesionales
+-- ============================================================================
+-- 3. CATÁLOGOS ACADÉMICOS
+-- ============================================================================
+
+-- Carreras / Programas de Estudio
 CREATE TABLE carreras (
-    codigo_carrera VARCHAR(20) PRIMARY KEY COMMENT 'Código interno de la carrera/programa de estudios',
-    nombre_carrera VARCHAR(100) NOT NULL COMMENT 'Nombre oficial (Ej: Diseño y Programación Web)',
-    resolucion_ministerial VARCHAR(100) COMMENT 'Número de RM que autoriza el programa'
-) COMMENT='Catálogo de carreras del instituto';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    codigo VARCHAR(20) NOT NULL UNIQUE COMMENT 'Código de carrera (Ej: DPW)',
+    nombre VARCHAR(100) NOT NULL,
+    resolucion VARCHAR(100)
+) COMMENT='Programas de estudio';
 
--- Tabla: Unidades Didácticas (Cursos según plan curricular)
+-- Unidades Didácticas (Cursos)
 CREATE TABLE unidades_didacticas (
-    codigo_curso VARCHAR(20) PRIMARY KEY COMMENT 'Código de la unidad didáctica (Ej: A, B, UD-101)',
-    codigo_carrera VARCHAR(20) NOT NULL COMMENT 'Carrera a la que pertenece el curso',
-    nombre_curso VARCHAR(150) NOT NULL COMMENT 'Nombre de la materia/asignatura',
-    creditos DECIMAL(4,1) NOT NULL COMMENT 'Valor crediticio de la unidad didáctica',
-    semestre_pertenece VARCHAR(20) NOT NULL COMMENT 'Semestre asignado en el plan de estudios',
-    FOREIGN KEY (codigo_carrera) REFERENCES carreras(codigo_carrera)
-) COMMENT='Catálogo de cursos y asignaturas';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    codigo VARCHAR(20) NOT NULL UNIQUE COMMENT 'Código de la materia (Ej: UD-101)',
+    id_carrera INT NOT NULL,
+    nombre VARCHAR(150) NOT NULL,
+    creditos DECIMAL(4,1) NOT NULL,
+    semestre VARCHAR(20) NOT NULL,
+    FOREIGN KEY (id_carrera) REFERENCES carreras(id)
+) COMMENT='Unidades didácticas por carrera';
 
 -- ============================================================================
--- TABLAS OPERACIONALES (Matrícula y Nómina)
+-- 4. MATRÍCULA Y NÓMINA (OPERACIONAL)
 -- ============================================================================
 
--- Tabla: Proceso de Matrícula (Cabecera de la ficha individual)
+-- Cabecera de Matrícula
 CREATE TABLE matriculas (
-    id_matricula INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID único de la transacción de matrícula',
-    codigo_estudiante VARCHAR(20) NOT NULL COMMENT 'Estudiante que realiza la matrícula',
-    codigo_carrera VARCHAR(20) NOT NULL COMMENT 'Carrera en la que se matricula',
-    periodo_academico VARCHAR(10) NOT NULL COMMENT 'Período académico (Ej: 2025-I, 2026-II)',
-    semestre_academico VARCHAR(20) NOT NULL COMMENT 'Semestre lectivo actual (Ej: Quinto, 2°)',
-    proceso_fecha DATE NOT NULL COMMENT 'Fecha de registro de la matrícula',
-    total_creditos DECIMAL(4,1) NOT NULL COMMENT 'Suma total de créditos inscritos',
-    tipo_proceso VARCHAR(50) DEFAULT 'Regular' COMMENT 'Regular, Repitencia, Reingresante',
-    CONSTRAINT unq_estudiante_periodo UNIQUE(codigo_estudiante, periodo_academico),
-    FOREIGN KEY (codigo_estudiante) REFERENCES estudiantes(codigo_estudiante),
-    FOREIGN KEY (codigo_carrera) REFERENCES carreras(codigo_carrera)
-) COMMENT='Cabecera de matrículas por periodo';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_usuario INT NOT NULL COMMENT 'Alumno matriculado',
+    id_carrera INT NOT NULL COMMENT 'Carrera elegida',
+    periodo VARCHAR(10) NOT NULL COMMENT 'Ej: 2025-I',
+    semestre VARCHAR(20) NOT NULL COMMENT 'Ej: Quinto',
+    fecha DATE NOT NULL COMMENT 'Fecha de matriculación',
+    total_creditos DECIMAL(4,1) NOT NULL,
+    tipo VARCHAR(50) DEFAULT 'Regular',
+    CONSTRAINT unq_usuario_periodo UNIQUE(id_usuario, periodo),
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id),
+    FOREIGN KEY (id_carrera) REFERENCES carreras(id)
+) COMMENT='Matrículas individuales';
 
--- Tabla: Detalle de Matrícula (Cursos inscritos en la ficha individual)
+-- Detalle de Matrícula (Cursos inscritos)
 CREATE TABLE detalle_matricula (
-    id_detalle INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID del ítem detallado',
-    id_matricula INT NOT NULL COMMENT 'Matrícula a la que pertenece',
-    codigo_curso VARCHAR(20) NOT NULL COMMENT 'Unidad didáctica matriculada',
-    condicion VARCHAR(50) DEFAULT 'Primera Matricula' COMMENT 'Primera Matricula, 2da Matricula, Repitencia',
-    observacion VARCHAR(100) COMMENT 'Anotaciones adicionales sobre la materia',
-    FOREIGN KEY (id_matricula) REFERENCES matriculas(id_matricula) ON DELETE CASCADE,
-    FOREIGN KEY (codigo_curso) REFERENCES unidades_didacticas(codigo_curso)
-) COMMENT='Asignaturas inscritas en cada ficha';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_matricula INT NOT NULL,
+    id_unidad INT NOT NULL,
+    condicion VARCHAR(50) DEFAULT 'Primera Matricula',
+    observacion VARCHAR(100),
+    FOREIGN KEY (id_matricula) REFERENCES matriculas(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_unidad) REFERENCES unidades_didacticas(id)
+) COMMENT='Materias inscritas en la matrícula';
 
--- Tabla: Nóminas de Matrícula (Cabecera del reporte consolidado oficial por grupo/sección)
+-- Cabecera de Nómina Oficial
 CREATE TABLE nominas (
-    id_nomina INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID de la nómina emitida',
-    codigo_carrera VARCHAR(20) NOT NULL COMMENT 'Programa de estudios evaluado',
-    periodo_academico VARCHAR(10) NOT NULL COMMENT 'Periodo académico del reporte',
-    semestre VARCHAR(20) NOT NULL COMMENT 'Semestre del grupo',
-    seccion VARCHAR(10) DEFAULT 'Única' COMMENT 'Sección del grupo',
-    turno VARCHAR(20) DEFAULT 'Diurno' COMMENT 'Turno de clase',
-    fecha_emision DATE NOT NULL COMMENT 'Fecha de cierre y firma de la nómina',
-    total_hombres INT DEFAULT 0 COMMENT 'Resumen: Cantidad de varones',
-    total_mujeres INT DEFAULT 0 COMMENT 'Resumen: Cantidad de mujeres',
-    total_alumnos INT DEFAULT 0 COMMENT 'Resumen: Total de estudiantes matriculados',
-    FOREIGN KEY (codigo_carrera) REFERENCES carreras(codigo_carrera)
-) COMMENT='Cabecera del consolidado de nómina oficial';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_carrera INT NOT NULL,
+    periodo VARCHAR(10) NOT NULL COMMENT 'Ej: 2026-II',
+    semestre VARCHAR(20) NOT NULL,
+    seccion VARCHAR(10) DEFAULT 'Única',
+    turno VARCHAR(20) DEFAULT 'Diurno',
+    fecha_emision DATE NOT NULL,
+    total_hombres INT DEFAULT 0,
+    total_mujeres INT DEFAULT 0,
+    total_alumnos INT DEFAULT 0,
+    FOREIGN KEY (id_carrera) REFERENCES carreras(id)
+) COMMENT='Nóminas consolidadas por sección';
 
--- Tabla: Detalle de Nómina (Relaciona el consolidado con cada estudiante y sus unidades)
+-- Detalle de Nómina
 CREATE TABLE detalle_nomina (
-    id_detalle_nomina INT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID de fila de la nómina',
-    id_nomina INT NOT NULL COMMENT 'Nómina oficial a la que pertenece',
-    codigo_estudiante VARCHAR(20) NOT NULL COMMENT 'Estudiante incluido en la lista',
-    numero_orden INT NOT NULL COMMENT 'Número correlativo en la nómina (N°)',
-    edad_al_momento INT COMMENT 'Edad calculada del estudiante al emitir nómina',
-    observacion_nomina VARCHAR(10) DEFAULT 'N' COMMENT 'N = Regular, R1, R2, R3',
-    FOREIGN KEY (id_nomina) REFERENCES nominas(id_nomina) ON DELETE CASCADE,
-    FOREIGN KEY (codigo_estudiante) REFERENCES estudiantes(codigo_estudiante)
-) COMMENT='Lista consolidada de alumnos por nómina';
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_nomina INT NOT NULL,
+    id_usuario INT NOT NULL COMMENT 'Alumno registrado en la lista',
+    numero_orden INT NOT NULL,
+    edad INT,
+    observacion VARCHAR(10) DEFAULT 'N',
+    FOREIGN KEY (id_nomina) REFERENCES nominas(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id)
+) COMMENT='Relación de alumnos en la nómina';
 
 -- ============================================================================
--- VERIFICACIÓN
+-- 5. INSERT DE PRUEBA Y ROLES INICIALES
 -- ============================================================================
+
+INSERT INTO roles (nombre, descripcion) VALUES 
+('Admin', 'Acceso total al sistema y gestión de usuarios'),
+('Maestro', 'Docente encargado de dictar unidades didácticas y registrar notas'),
+('Alumno', 'Estudiante matriculado con acceso a sus fichas y cursos');
+
 SHOW TABLES;
